@@ -17,8 +17,7 @@ jobs:
       - run: pip install requests pyyaml
       - run: python send_daily_message.py
         env:
-          BOT_ID:           ${{ secrets.BOT_ID }}
-          BOT_SECRET:       ${{ secrets.BOT_SECRET }}
+          WEBHOOK_URL:      ${{ secrets.WEBHOOK_URL }}
           WEATHER_API_KEY:  ${{ secrets.WEATHER_API_KEY }}
           CITY:             ${{ secrets.CITY }}
           NICKNAME:         ${{ secrets.NICKNAME }}
