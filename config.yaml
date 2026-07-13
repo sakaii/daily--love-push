@@ -1,0 +1,26 @@
+# ============================================
+# 每日微信推送 - 配置文件
+# 敏感信息（webhook、天气 Key）在 GitHub Actions
+# 中通过环境变量注入，这里只放非敏感信息
+# ============================================
+
+robot:
+  # webhook_url 通过环境变量 WEBHOOK_URL 注入
+  webhook_url: ""
+
+weather:
+  # api_key 通过环境变量 WEATHER_API_KEY 注入
+  api_key: ""
+  city: "北京"
+
+lover:
+  nickname: "宝贝"
+  start_date: "2022-01-01"
+
+family_birthdays:
+  - name: "老婆"
+    date: "06-15"
+  - name: "妈妈"
+    date: "08-20"
+  - name: "爸爸"
+    date: "10-01"
