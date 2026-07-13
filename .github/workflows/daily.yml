@@ -18,7 +18,6 @@ jobs:
       - run: python send_daily_message.py
         env:
           WEBHOOK_URL:      ${{ secrets.WEBHOOK_URL }}
-          WEATHER_API_KEY:  ${{ secrets.WEATHER_API_KEY }}
           CITY:             ${{ secrets.CITY }}
           NICKNAME:         ${{ secrets.NICKNAME }}
           START_DATE:       ${{ secrets.START_DATE }}

@@ -1,12 +1,12 @@
 # ============================================
 # 每日微信推送 - 配置文件 ❤️
+# 天气改用 Open-Meteo，无需 API Key
 # ============================================
 
 robot:
   webhook_url: ""
 
 weather:
-  api_key: ""
   city: "Suining"
 
 lover:
@@ -14,9 +14,9 @@ lover:
   start_date: "2016-10-29"
 
 family_birthdays:
-  - name: "老婆"
+  - name: "妈妈"
     date: "07-03"
-  - name: "女儿"
-    date: "05-05"
   - name: "我"
+    date: "05-05"
+  - name: "爸爸"
     date: "02-10"

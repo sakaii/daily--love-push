@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 每日微信自动推送 ❤️
-给老婆的生日礼物
+—— 从女儿的角度，给爸爸妈妈的早安问候
 """
 
 import sys
@@ -24,9 +24,7 @@ def load_config():
         cfg = yaml.safe_load(f)
     overrides = {
         ("robot", "webhook_url"):  "WEBHOOK_URL",
-        ("weather", "api_key"):    "WEATHER_API_KEY",
         ("weather", "city"):       "CITY",
-        ("lover", "nickname"):     "NICKNAME",
         ("lover", "start_date"):   "START_DATE",
     }
     for (section, key), env in overrides.items():
@@ -66,23 +64,14 @@ def parse_mmdd(mmdd: str):
 # =============================================
 
 def days_until_weekend() -> int:
-    """距离最近周六还有几天（如果已是周末返回0）"""
-    w = today().weekday()  # Mon=0, Sun=6
-    if w >= 5:  # 周六日
-        return 0
-    return 5 - w  # 到周六的天数
-
+    w = today().weekday()
+    return 0 if w >= 5 else 5 - w
 
 def get_next_national_day() -> date:
-    """下一个国庆节（10月1日）"""
     year = today().year
     national = date(year, 10, 1)
-    if national < today():
-        national = date(year + 1, 10, 1)
-    return national
+    return national if national >= today() else date(year + 1, 10, 1)
 
-
-# 春节公历日期（2024-2035年）
 SPRING_FESTIVAL_DATES = {
     2024: date(2024, 2, 10),
     2025: date(2025, 1, 29),
@@ -99,104 +88,103 @@ SPRING_FESTIVAL_DATES = {
 }
 
 def get_next_spring_festival() -> date | None:
-    """下一个春节"""
     year = today().year
-    # 先看今年春节是否还没过
     if year in SPRING_FESTIVAL_DATES and SPRING_FESTIVAL_DATES[year] >= today():
         return SPRING_FESTIVAL_DATES[year]
-    # 看明年
     if year + 1 in SPRING_FESTIVAL_DATES:
         return SPRING_FESTIVAL_DATES[year + 1]
     return None
 
 
 # =============================================
-# 天气查询（OpenWeatherMap）
+# 天气查询（Open-Meteo · 完全免费 · 无需 API Key）
+# 遂宁坐标：30.53°N, 105.57°E
 # =============================================
 
-API_KEY = config["weather"]["api_key"]
-CITY = config["weather"]["city"]
+LAT, LON = 30.53, 105.57
+CITY_DISPLAY = "遂宁"
+
+# WMO 天气代码 → 中文描述
+WMO_CODES = {
+    0: "☀️ 晴", 1: "🌤 晴间多云", 2: "⛅ 多云", 3: "☁️ 阴天",
+    45: "🌫 雾", 48: "🌫 大雾",
+    51: "🌦 毛毛雨", 53: "🌦 毛毛雨", 55: "🌦 毛毛雨",
+    56: "🌦 冻雨", 57: "🌦 冻雨",
+    61: "🌧 小雨", 63: "🌧 中雨", 65: "🌧 大雨",
+    66: "🌧 冻雨", 67: "🌧 冻雨",
+    71: "🌨 小雪", 73: "🌨 中雪", 75: "🌨 大雪",
+    77: "🌨 雪粒",
+    80: "🌦 阵雨", 81: "🌧 中阵雨", 82: "🌧 大阵雨",
+    85: "🌨 小阵雪", 86: "🌨 大阵雪",
+    95: "⛈ 雷暴", 96: "⛈ 雷暴+冰雹", 99: "⛈ 强雷暴+冰雹",
+}
+
+RAIN_CODES = {51, 53, 55, 56, 57, 61, 63, 65, 66, 67, 80, 81, 82, 95, 96, 99}
+SNOW_CODES = {71, 73, 75, 77, 85, 86}
 
 def get_weather():
-    url = "https://api.openweathermap.org/data/2.5/weather"
-    params = {"q": CITY, "appid": API_KEY, "units": "metric", "lang": "zh_cn"}
+    """获取实时天气（Open-Meteo，无需 API Key）"""
+    url = "https://api.open-meteo.com/v1/forecast"
+    params = {
+        "latitude": LAT,
+        "longitude": LON,
+        "current": "temperature_2m,relative_humidity_2m,apparent_temperature,weather_code",
+        "daily": "temperature_2m_max,temperature_2m_min,precipitation_probability_max,weather_code",
+        "timezone": "Asia/Shanghai",
+        "forecast_days": 1,
+    }
     try:
         resp = requests.get(url, params=params, timeout=10)
         data = resp.json()
-        if data.get("cod") == 200:
+        if "current" in data:
+            curr = data["current"]
+            daily = data.get("daily", {})
+            code = curr.get("weather_code", 0)
             return {
-                "temp":       data["main"]["temp"],
-                "feels_like": data["main"]["feels_like"],
-                "humidity":   data["main"]["humidity"],
-                "text":       data["weather"][0]["description"],
+                "temp":       curr.get("temperature_2m"),
+                "feels_like": curr.get("apparent_temperature"),
+                "humidity":   curr.get("relative_humidity_2m"),
+                "text":       WMO_CODES.get(code, f"未知({code})"),
+                "code":       code,
+                "temp_max":   daily.get("temperature_2m_max", [None])[0],
+                "temp_min":   daily.get("temperature_2m_min", [None])[0],
+                "pop":        daily.get("precipitation_probability_max", [0])[0] / 100,
             }
-        else:
-            print(f"天气API返回: {data.get('message', 'unknown')}")
     except Exception as e:
         print(f"获取天气失败: {e}")
     return None
 
-def get_forecast():
-    url = "https://api.openweathermap.org/data/2.5/forecast"
-    params = {"q": CITY, "appid": API_KEY, "units": "metric", "lang": "zh_cn"}
-    try:
-        resp = requests.get(url, params=params, timeout=10)
-        data = resp.json()
-        if data.get("cod") == "200":
-            today_entries = [d for d in data["list"]
-                             if d["dt_txt"].startswith(today().isoformat())]
-            if today_entries:
-                pops = [d.get("pop", 0) for d in today_entries]
-                temps_max = [d["main"]["temp_max"] for d in today_entries]
-                temps_min = [d["main"]["temp_min"] for d in today_entries]
-                return {
-                    "temp_max": round(max(temps_max)),
-                    "temp_min": round(min(temps_min)),
-                    "pop": max(pops),
-                    "texts": [d["weather"][0]["description"] for d in today_entries],
-                }
-    except Exception as e:
-        print(f"获取预报失败: {e}")
-    return None
-
-def need_umbrella(w, f) -> bool:
-    kw = ["雨", "雪", "雹", "霰", "drizzle", "rain", "snow"]
-    if w:
-        for k in kw:
-            if k in w.get("text", ""):
-                return True
-    if f:
-        if f.get("pop", 0) >= 0.5:
-            return True
-        for t in f.get("texts", []):
-            for k in kw:
-                if k in t:
-                    return True
+def need_umbrella(w) -> bool:
+    if not w:
+        return False
+    code = w.get("code", 0)
+    if code in RAIN_CODES or code in SNOW_CODES:
+        return True
+    if w.get("pop", 0) >= 0.5:
+        return True
     return False
 
 
 # =============================================
-# 组装消息
+# 组装消息（女儿视角 ❤️）
 # =============================================
 
 def build_message():
-    n = config["lover"]["nickname"]
     lines = []
 
-    hour = datetime.now().hour
-    greeting = "早安" if hour < 12 else ("下午好" if hour < 18 else "晚上好")
-    lines.append(f"☀️ **{greeting}，{n}！**")
+    # ---- 早安问候 ----
+    lines.append("☀️ **早上好，爸爸妈妈！**")
     lines.append("")
 
-    # --- 在一起多少天 ---
+    # ---- 在一起多少天 ----
     start = config["lover"]["start_date"]
     days = calc_days_together(start)
     start_display = datetime.strptime(start, "%Y-%m-%d").strftime("%Y年%m月%d日")
     lines.append(f"💕 从 {start_display} 到现在")
-    lines.append(f"   我们已经在一起 **{days} 天** 啦！")
+    lines.append(f"   爸爸妈妈已经在一起 **{days} 天** 啦！")
     lines.append("")
 
-    # --- 生日倒计时 ---
+    # ---- 生日倒计时 ----
     birthdays = config.get("family_birthdays", [])
     if birthdays:
         lines.append("🎂 **距离家人生日：**")
@@ -204,55 +192,50 @@ def build_message():
         for b in birthdays:
             m, d = parse_mmdd(b["date"])
             remain = days_until(get_next_birthday(m, d))
-            if remain == 0:
-                items.append((0, b["name"], "🎉 就是今天！生日快乐！"))
-            elif remain == 1:
-                items.append((1, b["name"], "明天就是啦 🎉"))
-            elif remain > 0:
-                items.append((remain, b["name"], f"还有 **{remain} 天**"))
+            label = remain == 0 and "🎉 就是今天！生日快乐！" or (remain == 1 and "明天就是啦 🎉" or (remain > 0 and f"还有 **{remain} 天**" or None))
+            if label:
+                items.append((remain, b["name"], label))
         items.sort(key=lambda x: x[0])
         for _, name, text in items:
             lines.append(f"   · {name}：{text}")
         lines.append("")
 
-    # --- 天气 ---
+    # ---- 天气 ----
     w = get_weather()
-    f = get_forecast()
     if w:
-        lines.append(f"🌤 **今日天气 ({CITY})**")
+        lines.append(f"🌤 **今日天气 ({CITY_DISPLAY})**")
         lines.append(f"   天气：{w['text']}")
         lines.append(f"   温度：{w['temp']}°C（体感 {w['feels_like']}°C）")
-        if f:
-            lines.append(f"   最高：{f['temp_max']}°C  /  最低：{f['temp_min']}°C")
+        if w["temp_max"] is not None:
+            lines.append(f"   最高：{w['temp_max']}°C  /  最低：{w['temp_min']}°C")
         lines.append("")
-        lines.append("☔ **今天可能要下雨，记得带伞哦～**" if need_umbrella(w, f)
+        lines.append("☔ **今天可能要下雨，出门记得带伞哦～**" if need_umbrella(w)
                      else "☀️ 今天不用带伞，放心出门吧～")
     else:
         lines.append("🌤 天气信息暂时获取不到，出门前看一眼窗外吧～")
     lines.append("")
 
-    # --- 周末倒计时 ---
-    weekend_days = days_until_weekend()
+    # ---- 周末倒计时 ----
+    wd = days_until_weekend()
     weekdays_cn = ["一", "二", "三", "四", "五", "六", "日"]
-    today_w = weekdays_cn[today().weekday()]
-    if weekend_days == 0:
-        lines.append(f"🎉 今天是周{today_w}，好好享受周末吧！")
-    elif weekend_days == 1:
+    tw = weekdays_cn[today().weekday()]
+    if wd == 0:
+        lines.append(f"🎉 今天是周六，好好享受周末吧！" if today().weekday() == 5 else "🎉 今天是周日，好好享受周末吧！")
+    elif wd == 1:
         lines.append("🎉 明天就是周末啦！加油最后一天！")
     else:
-        lines.append(f"📅 今天是周{today_w}，距离周末还有 **{weekend_days} 天**")
+        lines.append(f"📅 今天是周{tw}，距离周末还有 **{wd} 天**")
     lines.append("")
 
-    # --- 国庆节倒计时 ---
-    national = get_next_national_day()
-    nd = days_until(national)
+    # ---- 国庆节 ----
+    nd = days_until(get_next_national_day())
     if nd == 0:
         lines.append("🇨🇳 **国庆节快乐！** 🎉")
     else:
         lines.append(f"🇨🇳 距离国庆节还有 **{nd} 天**")
     lines.append("")
 
-    # --- 春节倒计时 ---
+    # ---- 春节 ----
     sf = get_next_spring_festival()
     if sf:
         sd = days_until(sf)
@@ -262,17 +245,14 @@ def build_message():
             lines.append(f"🧧 距离春节还有 **{sd} 天**")
     lines.append("")
 
-    # --- 情话 ---
+    # ---- 小情话 ----
     quotes = [
-        "想你的心，从早上就开始了。",
-        "今天也是超喜欢你的一天。",
-        "只要有你在，每天都是好天气。",
-        "想牵着你的手，走过春夏秋冬。",
-        "你是我遇见的所有美好里，最好的那个。",
-        "没有什么比你的笑容更治愈了。",
-        "今天也要开开心心的！💕",
-        "每天醒来，第一件事就是想你。",
-        "你永远是我最爱的人。",
+        "爸爸妈妈要一直这么幸福哦！❤️",
+        "今天也是爱爸爸妈妈的一天！",
+        "有爸爸妈妈的地方就是家 🏠",
+        "爸爸妈妈是世界上最好的爸爸妈妈！",
+        "你们是我最爱的人 💕",
+        "爸爸妈妈要开开心心的哦！",
     ]
     lines.append(f"💌 {random.choice(quotes)}")
 
@@ -309,7 +289,7 @@ def push_to_wechat(content: str):
 
 def main():
     print("=" * 40)
-    print("❤️  每日早安推送")
+    print("❤️  每日早安推送（女儿视角）")
     print(f"📅  {today()}")
     print("=" * 40)
 
