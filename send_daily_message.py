@@ -4,7 +4,9 @@
 每日微信自动推送 ❤️
 给老婆的生日礼物 —— 每天自动在企微群发暖心消息
 
-支持本地运行（config.yaml）和 GitHub Actions（环境变量）两种模式
+支持两种方式：
+  1. Bot ID + Secret（API 模式，长连接/回调都可以）
+  2. Webhook URL（简单模式）
 """
 
 import sys
@@ -16,7 +18,7 @@ from datetime import date, datetime
 from pathlib import Path
 
 # =============================================
-# 配置加载（环境变量优先，兼容 GitHub Actions）
+# 配置加载（环境变量优先）
 # =============================================
 
 CONFIG_PATH = Path(__file__).parent / "config.yaml"
@@ -25,16 +27,18 @@ def load_config():
     with open(CONFIG_PATH, "r", encoding="utf-8") as f:
         cfg = yaml.safe_load(f)
 
-    # 以下环境变量会覆盖 config.yaml（GitHub Actions 时使用）
-    env_overrides = {
-        ("robot", "webhook_url"):          "WEBHOOK_URL",
-        ("weather", "api_key"):            "WEATHER_API_KEY",
-        ("weather", "city"):               "CITY",
-        ("lover", "nickname"):             "NICKNAME",
-        ("lover", "start_date"):           "START_DATE",
+    # 环境变量覆盖（GitHub Actions 时用）
+    overrides = {
+        ("robot", "bot_id"):       "BOT_ID",
+        ("robot", "bot_secret"):   "BOT_SECRET",
+        ("robot", "webhook_url"):  "WEBHOOK_URL",
+        ("weather", "api_key"):    "WEATHER_API_KEY",
+        ("weather", "city"):       "CITY",
+        ("lover", "nickname"):     "NICKNAME",
+        ("lover", "start_date"):   "START_DATE",
     }
-    for (section, key), env_name in env_overrides.items():
-        val = os.environ.get(env_name)
+    for (section, key), env in overrides.items():
+        val = os.environ.get(env)
         if val:
             cfg[section][key] = val
 
@@ -49,21 +53,17 @@ config = load_config()
 def today():
     return date.today()
 
-
 def days_until(target_date: date) -> int:
     return (target_date - today()).days
-
 
 def calc_days_together(start_str: str) -> int:
     start = datetime.strptime(start_str, "%Y-%m-%d").date()
     return (today() - start).days
 
-
 def get_next_birthday(month: int, day: int) -> date:
     this_year = today().year
     bday = date(this_year, month, day)
     return bday if bday >= today() else date(this_year + 1, month, day)
-
 
 def parse_mmdd(mmdd: str):
     parts = mmdd.strip().split("-")
@@ -76,7 +76,6 @@ def parse_mmdd(mmdd: str):
 
 API_KEY = config["weather"]["api_key"]
 CITY = config["weather"]["city"]
-
 
 def get_weather():
     url = "https://api.openweathermap.org/data/2.5/weather"
@@ -95,9 +94,7 @@ def get_weather():
         print(f"获取天气失败: {e}")
     return None
 
-
 def get_forecast():
-    """获取今天降水概率，判断是否需要带伞"""
     url = "https://api.openweathermap.org/data/2.5/forecast"
     params = {"q": CITY, "appid": API_KEY, "units": "metric", "lang": "zh_cn"}
     try:
@@ -119,7 +116,6 @@ def get_forecast():
     except Exception as e:
         print(f"获取预报失败: {e}")
     return None
-
 
 def need_umbrella(now_weather, forecast) -> bool:
     rain_keywords = ["雨", "雪", "雹", "霰", "drizzle", "rain", "snow"]
@@ -150,7 +146,6 @@ def build_message():
     lines.append(f"☀️ **{greeting}，{n}！**")
     lines.append("")
 
-    # 在一起多少天
     start = config["lover"]["start_date"]
     days = calc_days_together(start)
     start_display = datetime.strptime(start, "%Y-%m-%d").strftime("%Y年%m月%d日")
@@ -158,7 +153,6 @@ def build_message():
     lines.append(f"   我们已经在一起 **{days} 天** 啦！")
     lines.append("")
 
-    # 生日倒计时
     birthdays = config.get("family_birthdays", [])
     if birthdays:
         lines.append("🎂 **距离家人生日：**")
@@ -179,7 +173,6 @@ def build_message():
             lines.append(f"   · {name}：{text}")
         lines.append("")
 
-    # 天气
     w = get_weather()
     f = get_forecast()
     if w:
@@ -195,7 +188,6 @@ def build_message():
         lines.append("🌤 天气信息暂时获取不到，出门前看一眼窗外吧～")
     lines.append("")
 
-    # 随机情话
     quotes = [
         "想你的心，从早上就开始了。",
         "今天也是超喜欢你的一天。",
@@ -215,24 +207,91 @@ def build_message():
 # 推送到企业微信群
 # =============================================
 
-def push_to_wechat(content: str):
-    url = config["robot"]["webhook_url"]
+def get_bot_token(bot_id: str, bot_secret: str) -> str | None:
+    """通过 Bot ID + Secret 获取 access_token"""
+    url = "https://qyapi.weixin.qq.com/cgi-bin/bot/token"
+    try:
+        resp = requests.post(url, json={
+            "bot_id": bot_id,
+            "bot_secret": bot_secret,
+        }, timeout=10)
+        data = resp.json()
+        if data.get("errcode") == 0:
+            print("✅ 获取 Bot Token 成功")
+            return data["access_token"]
+        else:
+            print(f"❌ 获取 Bot Token 失败: {data}")
+    except Exception as e:
+        print(f"❌ 获取 Bot Token 异常: {e}")
+    return None
+
+
+def push_via_bot(content: str) -> bool:
+    """通过 Bot API 发送 markdown 消息"""
+    bot_id = config["robot"]["bot_id"]
+    bot_secret = config["robot"]["bot_secret"]
+
+    token = get_bot_token(bot_id, bot_secret)
+    if not token:
+        return False
+
+    url = f"https://qyapi.weixin.qq.com/cgi-bin/bot/send?access_token={token}"
     payload = {
         "msgtype": "markdown",
         "markdown": {"content": content},
     }
     try:
         resp = requests.post(url, json=payload, timeout=15)
-        result = resp.json()
-        if result.get("errcode") == 0:
+        data = resp.json()
+        if data.get("errcode") == 0:
             print("✅ 企业微信推送成功！")
             return True
         else:
-            print(f"❌ 推送失败: {result}")
-            return False
+            print(f"❌ 推送失败: {data}")
     except Exception as e:
-        print(f"❌ 请求异常: {e}")
+        print(f"❌ 推送异常: {e}")
+    return False
+
+
+def push_via_webhook(content: str) -> bool:
+    """通过 Webhook URL 发送（兼容旧方式）"""
+    url = config["robot"]["webhook_url"]
+    if not url:
         return False
+
+    payload = {
+        "msgtype": "markdown",
+        "markdown": {"content": content},
+    }
+    try:
+        resp = requests.post(url, json=payload, timeout=15)
+        data = resp.json()
+        if data.get("errcode") == 0:
+            print("✅ 企业微信推送成功！")
+            return True
+        else:
+            print(f"❌ 推送失败: {data}")
+    except Exception as e:
+        print(f"❌ 推送异常: {e}")
+    return False
+
+
+def push_to_wechat(content: str) -> bool:
+    """自动选择推送方式：Bot API 优先，Webhook 兜底"""
+    bot_id = config["robot"].get("bot_id", "")
+    bot_secret = config["robot"].get("bot_secret", "")
+
+    if bot_id and bot_secret:
+        print("📤 使用 Bot API 推送...")
+        return push_via_bot(content)
+
+    webhook = config["robot"].get("webhook_url", "")
+    if webhook:
+        print("📤 使用 Webhook 推送...")
+        return push_via_webhook(content)
+
+    print("❌ 未配置任何推送方式（请设置 bot_id+bot_secret 或 webhook_url）")
+    return False
 
 
 # =============================================
@@ -241,7 +300,7 @@ def push_to_wechat(content: str):
 
 def main():
     print("=" * 40)
-    print("❤️  每日自动推送")
+    print("❤️  每日早安推送")
     print(f"📅  {today()}")
     print("=" * 40)
 
@@ -249,7 +308,7 @@ def main():
     print("\n" + message + "\n")
 
     success = push_to_wechat(message)
-    print("\n✅ 完成！" if success else "\n❌ 失败")
+    print("\n✅ 完成！" if success else "\n❌ 失败，请检查配置")
     return 0 if success else 1
 
 
