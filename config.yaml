@@ -7,7 +7,7 @@ robot:
 
 weather:
   api_key: ""
-  city: "Beijing"
+  city: "Suining"
 
 lover:
   nickname: "宝贝"
