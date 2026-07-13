@@ -2,11 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 每日微信自动推送 ❤️
-给老婆的生日礼物 —— 每天自动在企微群发暖心消息
-
-支持两种方式：
-  1. Bot ID + Secret（API 模式，长连接/回调都可以）
-  2. Webhook URL（简单模式）
+给老婆的生日礼物
 """
 
 import sys
@@ -14,11 +10,11 @@ import os
 import yaml
 import requests
 import random
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 # =============================================
-# 配置加载（环境变量优先）
+# 配置加载
 # =============================================
 
 CONFIG_PATH = Path(__file__).parent / "config.yaml"
@@ -26,11 +22,7 @@ CONFIG_PATH = Path(__file__).parent / "config.yaml"
 def load_config():
     with open(CONFIG_PATH, "r", encoding="utf-8") as f:
         cfg = yaml.safe_load(f)
-
-    # 环境变量覆盖（GitHub Actions 时用）
     overrides = {
-        ("robot", "bot_id"):       "BOT_ID",
-        ("robot", "bot_secret"):   "BOT_SECRET",
         ("robot", "webhook_url"):  "WEBHOOK_URL",
         ("weather", "api_key"):    "WEATHER_API_KEY",
         ("weather", "city"):       "CITY",
@@ -41,7 +33,6 @@ def load_config():
         val = os.environ.get(env)
         if val:
             cfg[section][key] = val
-
     return cfg
 
 config = load_config()
@@ -71,7 +62,56 @@ def parse_mmdd(mmdd: str):
 
 
 # =============================================
-# 天气查询（OpenWeatherMap · 免费）
+# 日期倒计时
+# =============================================
+
+def days_until_weekend() -> int:
+    """距离最近周六还有几天（如果已是周末返回0）"""
+    w = today().weekday()  # Mon=0, Sun=6
+    if w >= 5:  # 周六日
+        return 0
+    return 5 - w  # 到周六的天数
+
+
+def get_next_national_day() -> date:
+    """下一个国庆节（10月1日）"""
+    year = today().year
+    national = date(year, 10, 1)
+    if national < today():
+        national = date(year + 1, 10, 1)
+    return national
+
+
+# 春节公历日期（2024-2035年）
+SPRING_FESTIVAL_DATES = {
+    2024: date(2024, 2, 10),
+    2025: date(2025, 1, 29),
+    2026: date(2026, 2, 17),
+    2027: date(2027, 2, 6),
+    2028: date(2028, 1, 26),
+    2029: date(2029, 2, 13),
+    2030: date(2030, 2, 3),
+    2031: date(2031, 1, 23),
+    2032: date(2032, 2, 11),
+    2033: date(2033, 1, 31),
+    2034: date(2034, 2, 19),
+    2035: date(2035, 2, 8),
+}
+
+def get_next_spring_festival() -> date | None:
+    """下一个春节"""
+    year = today().year
+    # 先看今年春节是否还没过
+    if year in SPRING_FESTIVAL_DATES and SPRING_FESTIVAL_DATES[year] >= today():
+        return SPRING_FESTIVAL_DATES[year]
+    # 看明年
+    if year + 1 in SPRING_FESTIVAL_DATES:
+        return SPRING_FESTIVAL_DATES[year + 1]
+    return None
+
+
+# =============================================
+# 天气查询（OpenWeatherMap）
 # =============================================
 
 API_KEY = config["weather"]["api_key"]
@@ -90,6 +130,8 @@ def get_weather():
                 "humidity":   data["main"]["humidity"],
                 "text":       data["weather"][0]["description"],
             }
+        else:
+            print(f"天气API返回: {data.get('message', 'unknown')}")
     except Exception as e:
         print(f"获取天气失败: {e}")
     return None
@@ -117,18 +159,18 @@ def get_forecast():
         print(f"获取预报失败: {e}")
     return None
 
-def need_umbrella(now_weather, forecast) -> bool:
-    rain_keywords = ["雨", "雪", "雹", "霰", "drizzle", "rain", "snow"]
-    if now_weather:
-        for kw in rain_keywords:
-            if kw in now_weather.get("text", ""):
+def need_umbrella(w, f) -> bool:
+    kw = ["雨", "雪", "雹", "霰", "drizzle", "rain", "snow"]
+    if w:
+        for k in kw:
+            if k in w.get("text", ""):
                 return True
-    if forecast:
-        if forecast.get("pop", 0) >= 0.5:
+    if f:
+        if f.get("pop", 0) >= 0.5:
             return True
-        for t in forecast.get("texts", []):
-            for kw in rain_keywords:
-                if kw in t:
+        for t in f.get("texts", []):
+            for k in kw:
+                if k in t:
                     return True
     return False
 
@@ -146,13 +188,15 @@ def build_message():
     lines.append(f"☀️ **{greeting}，{n}！**")
     lines.append("")
 
+    # --- 在一起多少天 ---
     start = config["lover"]["start_date"]
     days = calc_days_together(start)
     start_display = datetime.strptime(start, "%Y-%m-%d").strftime("%Y年%m月%d日")
-    lines.append(f"💕 从 {start_display} 到今天")
+    lines.append(f"💕 从 {start_display} 到现在")
     lines.append(f"   我们已经在一起 **{days} 天** 啦！")
     lines.append("")
 
+    # --- 生日倒计时 ---
     birthdays = config.get("family_birthdays", [])
     if birthdays:
         lines.append("🎂 **距离家人生日：**")
@@ -164,15 +208,14 @@ def build_message():
                 items.append((0, b["name"], "🎉 就是今天！生日快乐！"))
             elif remain == 1:
                 items.append((1, b["name"], "明天就是啦 🎉"))
-            elif remain < 0:
-                continue
-            else:
+            elif remain > 0:
                 items.append((remain, b["name"], f"还有 **{remain} 天**"))
         items.sort(key=lambda x: x[0])
         for _, name, text in items:
             lines.append(f"   · {name}：{text}")
         lines.append("")
 
+    # --- 天气 ---
     w = get_weather()
     f = get_forecast()
     if w:
@@ -188,6 +231,38 @@ def build_message():
         lines.append("🌤 天气信息暂时获取不到，出门前看一眼窗外吧～")
     lines.append("")
 
+    # --- 周末倒计时 ---
+    weekend_days = days_until_weekend()
+    weekdays_cn = ["一", "二", "三", "四", "五", "六", "日"]
+    today_w = weekdays_cn[today().weekday()]
+    if weekend_days == 0:
+        lines.append(f"🎉 今天是周{today_w}，好好享受周末吧！")
+    elif weekend_days == 1:
+        lines.append("🎉 明天就是周末啦！加油最后一天！")
+    else:
+        lines.append(f"📅 今天是周{today_w}，距离周末还有 **{weekend_days} 天**")
+    lines.append("")
+
+    # --- 国庆节倒计时 ---
+    national = get_next_national_day()
+    nd = days_until(national)
+    if nd == 0:
+        lines.append("🇨🇳 **国庆节快乐！** 🎉")
+    else:
+        lines.append(f"🇨🇳 距离国庆节还有 **{nd} 天**")
+    lines.append("")
+
+    # --- 春节倒计时 ---
+    sf = get_next_spring_festival()
+    if sf:
+        sd = days_until(sf)
+        if sd == 0:
+            lines.append("🧧 **新年快乐！春节快乐！** 🎉")
+        else:
+            lines.append(f"🧧 距离春节还有 **{sd} 天**")
+    lines.append("")
+
+    # --- 情话 ---
     quotes = [
         "想你的心，从早上就开始了。",
         "今天也是超喜欢你的一天。",
@@ -195,8 +270,9 @@ def build_message():
         "想牵着你的手，走过春夏秋冬。",
         "你是我遇见的所有美好里，最好的那个。",
         "没有什么比你的笑容更治愈了。",
-        "你的存在，就是我每天醒来的理由。",
         "今天也要开开心心的！💕",
+        "每天醒来，第一件事就是想你。",
+        "你永远是我最爱的人。",
     ]
     lines.append(f"💌 {random.choice(quotes)}")
 
@@ -204,61 +280,14 @@ def build_message():
 
 
 # =============================================
-# 推送到企业微信群
+# 推送
 # =============================================
 
-def get_bot_token(bot_id: str, bot_secret: str) -> str | None:
-    """通过 Bot ID + Secret 获取 access_token"""
-    url = "https://qyapi.weixin.qq.com/cgi-bin/bot/token"
-    try:
-        resp = requests.post(url, json={
-            "bot_id": bot_id,
-            "bot_secret": bot_secret,
-        }, timeout=10)
-        data = resp.json()
-        if data.get("errcode") == 0:
-            print("✅ 获取 Bot Token 成功")
-            return data["access_token"]
-        else:
-            print(f"❌ 获取 Bot Token 失败: {data}")
-    except Exception as e:
-        print(f"❌ 获取 Bot Token 异常: {e}")
-    return None
-
-
-def push_via_bot(content: str) -> bool:
-    """通过 Bot API 发送 markdown 消息"""
-    bot_id = config["robot"]["bot_id"]
-    bot_secret = config["robot"]["bot_secret"]
-
-    token = get_bot_token(bot_id, bot_secret)
-    if not token:
-        return False
-
-    url = f"https://qyapi.weixin.qq.com/cgi-bin/bot/send?access_token={token}"
-    payload = {
-        "msgtype": "markdown",
-        "markdown": {"content": content},
-    }
-    try:
-        resp = requests.post(url, json=payload, timeout=15)
-        data = resp.json()
-        if data.get("errcode") == 0:
-            print("✅ 企业微信推送成功！")
-            return True
-        else:
-            print(f"❌ 推送失败: {data}")
-    except Exception as e:
-        print(f"❌ 推送异常: {e}")
-    return False
-
-
-def push_via_webhook(content: str) -> bool:
-    """通过 Webhook URL 发送（兼容旧方式）"""
+def push_to_wechat(content: str):
     url = config["robot"]["webhook_url"]
     if not url:
+        print("❌ 未配置 webhook_url")
         return False
-
     payload = {
         "msgtype": "markdown",
         "markdown": {"content": content},
@@ -266,32 +295,12 @@ def push_via_webhook(content: str) -> bool:
     try:
         resp = requests.post(url, json=payload, timeout=15)
         data = resp.json()
-        if data.get("errcode") == 0:
-            print("✅ 企业微信推送成功！")
-            return True
-        else:
-            print(f"❌ 推送失败: {data}")
+        ok = data.get("errcode") == 0
+        print("✅ 推送成功！" if ok else f"❌ 推送失败: {data}")
+        return ok
     except Exception as e:
-        print(f"❌ 推送异常: {e}")
-    return False
-
-
-def push_to_wechat(content: str) -> bool:
-    """自动选择推送方式：Bot API 优先，Webhook 兜底"""
-    bot_id = config["robot"].get("bot_id", "")
-    bot_secret = config["robot"].get("bot_secret", "")
-
-    if bot_id and bot_secret:
-        print("📤 使用 Bot API 推送...")
-        return push_via_bot(content)
-
-    webhook = config["robot"].get("webhook_url", "")
-    if webhook:
-        print("📤 使用 Webhook 推送...")
-        return push_via_webhook(content)
-
-    print("❌ 未配置任何推送方式（请设置 bot_id+bot_secret 或 webhook_url）")
-    return False
+        print(f"❌ 请求异常: {e}")
+        return False
 
 
 # =============================================
@@ -308,7 +317,7 @@ def main():
     print("\n" + message + "\n")
 
     success = push_to_wechat(message)
-    print("\n✅ 完成！" if success else "\n❌ 失败，请检查配置")
+    print("\n✅ 完成！" if success else "\n❌ 失败")
     return 0 if success else 1
 
 

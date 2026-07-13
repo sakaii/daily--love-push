@@ -3,26 +3,20 @@
 # ============================================
 
 robot:
-  # Bot ID + Secret（API 模式，推荐）
-  # 通过环境变量 BOT_ID / BOT_SECRET 注入
-  bot_id: ""
-  bot_secret: ""
-
-  # 或者用 Webhook URL（二选一）
   webhook_url: ""
 
 weather:
   api_key: ""
-  city: "北京"
+  city: "Beijing"
 
 lover:
   nickname: "宝贝"
-  start_date: "2022-01-01"
+  start_date: "2016-10-29"
 
 family_birthdays:
   - name: "老婆"
-    date: "06-15"
-  - name: "妈妈"
-    date: "08-20"
-  - name: "爸爸"
-    date: "10-01"
+    date: "07-03"
+  - name: "女儿"
+    date: "05-05"
+  - name: "我"
+    date: "02-10"
