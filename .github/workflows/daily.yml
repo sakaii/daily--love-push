@@ -1,10 +1,28 @@
 name: 每日早安推送
 
 on:
+  # ─── 方案 A：GitHub 内置定时任务 ───
+  # ⚠️ GitHub Actions schedule 有排队延迟，实际触发时间可能晚 30 分钟~3小时
+  #     所以这里设置 UTC 22:30（北京 06:30），留出延迟余量
   schedule:
-    # 每天 UTC 0:00 = 北京时间 08:00
-    - cron: '0 0 * * *'
+    - cron: '30 22 * * *'    # UTC 22:30 = 北京 06:30
+  # ─────────────────────────────────
+
+  # ─── 方案 B：手动触发（GitHub 网页端点 Run workflow） ───
   workflow_dispatch:
+  # ─────────────────────────────────
+
+  # ─── 方案 C（推荐）：外部门控定时触发 ───
+  # 用 cron-job.org（免费）在 每天 08:00（北京时间）精确触发：
+  #   URL:  https://api.github.com/repos/你的用户名/仓库名/dispatches
+  #   Method: POST
+  #   Headers:
+  #     Authorization: Bearer <你的 GitHub Personal Access Token>
+  #     Accept: application/vnd.github+json
+  #   Body:  {"event_type": "trigger-daily-message"}
+  # 比 GitHub 内置 schedule 准时得多 ✅
+  repository_dispatch:
+    types: [trigger-daily-message]
 
 jobs:
   send:

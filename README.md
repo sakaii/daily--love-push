@@ -72,7 +72,47 @@ git push -u origin main
 
 仓库里点 **Actions → 每日早安推送 → Run workflow**，群里如果收到消息就成功了 ✅
 
-之后每天早上 7:00（北京时间）会自动发，**电脑关机也不影响**。
+之后每天早上会自动发，**电脑关机也不影响**。
+
+---
+
+## ⏰ 解决定时不准的问题（重要）
+
+GitHub Actions 内置的 `schedule` 定时任务有**排队延迟**问题——高峰期可能晚 30 分钟~3 小时才执行。
+
+### 推荐方案：用 cron-job.org 精确触发（8:00 准时发）
+
+cron-job.org 是免费的在线定时服务，它会直接调用 GitHub API 触发工作流，比 GitHub 自带的 schedule 准时得多。
+
+#### 1️⃣ 生成 GitHub Personal Access Token
+
+1. 打开 https://github.com/settings/tokens
+2. 点 **Generate new token → Fine-grained token**
+3. **Repository access** → 选 **Only select repositories** → 勾选你的仓库
+4. **Permissions → Contents** → 设为 **Read and write**
+5. 点 **Generate token**，**复制保存好这个 token**（关掉页面就看不到了）
+
+#### 2️⃣ 在 cron-job.org 创建定时任务
+
+1. 打开 https://cron-job.org 并注册/登录
+2. 点 **Create Cron Job**
+3. 填写：
+   - **Title**: `每日早安推送`
+   - **URL**: `https://api.github.com/repos/你的用户名/你的仓库名/dispatches`
+   - **Method**: `POST`
+   - **Headers**:
+     ```
+     Authorization: Bearer 你的token
+     Accept: application/vnd.github+json
+     ```
+   - **Request Body**:
+     ```json
+     {"event_type": "trigger-daily-message"}
+     ```
+4. **Schedule**: 每天 `08:00`（选北京时间/GMT+8）
+5. 点 **Create**
+
+这样就搞定了！之后每天 08:00 准时发送 🎯
 
 ---
 
